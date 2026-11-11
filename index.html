@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%230b0910'/><path d='M14 24h30v10a14 14 0 0 1-14 14h-2A14 14 0 0 1 14 34z' fill='%23e8c27a'/><path d='M44 27h5a6 6 0 0 1 0 12h-5' fill='none' stroke='%23e8c27a' stroke-width='4'/><circle cx='29' cy='20' r='3' fill='%23e4572e'/></svg>">
 <title>茶中之国 · 汤泉火山村 — Volcano Village in a Teacup</title>
 <style>
   :root{
@@ -69,9 +70,22 @@
   }
   @keyframes spin{to{transform:rotate(360deg);}}
   #loading.hidden{opacity:0;pointer-events:none;}
+
+  /* ---------- link back to the portfolio ---------- */
+  #back{
+    position:fixed;right:18px;top:18px;z-index:20;
+    font:12px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:.1em;
+    color:#d6dfe7;text-decoration:none;
+    padding:.5rem .85rem;border:1px solid rgba(200,215,230,.26);border-radius:999px;
+    background:rgba(10,8,14,.5);backdrop-filter:blur(6px);
+    transition:color .2s ease,border-color .2s ease,background .2s ease;
+  }
+  #back:hover{color:#fff;border-color:rgba(228,87,46,.7);background:rgba(228,87,46,.18)}
+  @media (max-width:520px){ #back{top:12px;right:12px;padding:.42rem .7rem;font-size:11px} }
 </style>
 </head>
 <body>
+<a id="back" href="https://sryae07.github.io/portfolio/" rel="noopener">&#8592; Portfolio</a>
   <div id="app"></div>
 
   <div id="hud">
@@ -1880,7 +1894,12 @@ animate();
    The addon modules are fetched, their bare/relative imports are rewritten
    to absolute URLs, and they are loaded as blob modules.
    ========================================================================= */
+/* The copy that ships in vendor/ is tried first: it needs no network at all.
+   The CDNs stay as the fallback chain for anyone who opens the file elsewhere.
+   file:// cannot import a sibling file, so there we go straight to the CDNs. */
+const LOCAL_OK = location.protocol === 'http:' || location.protocol === 'https:';
 const CDNS=[
+  ...(LOCAL_OK?[{base:'./vendor/',threePath:'build/three.module.min.js'}]:[]),
   {base:'https://cdn.jsdelivr.net/npm/three@0.160.0/'},
   {base:'https://unpkg.com/three@0.160.0/'},
   {base:'https://fastly.jsdelivr.net/npm/three@0.160.0/'},
@@ -1892,8 +1911,9 @@ function withTimeout(p,ms){
   return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
 }
 async function loadModule(url){
-  if(moduleCache.has(url))return moduleCache.get(url);
-  const res=await fetch(url);
+  const abs=new URL(url,location.href).href;
+  if(moduleCache.has(abs))return moduleCache.get(abs);
+  const res=await fetch(abs);
   if(!res.ok)throw new Error('HTTP '+res.status);
   const src=await res.text();
   const deps=[];
@@ -1901,23 +1921,25 @@ async function loadModule(url){
   const depUrls=[];
   for(const s of deps){
     let target;
-    if(s==='three')target=THREE_URL;
-    else if(s.startsWith('.'))target=new URL(s,url).href;
+    /* three itself is imported once, by its real URL. Copying it into a blob
+       here is what made the browser load a second Three.js instance. */
+    if(s==='three'){depUrls.push(THREE_URL);continue;}
+    else if(s.startsWith('.'))target=new URL(s,abs).href;
     else target=s;
     depUrls.push(await loadModule(target));
   }
   let out=src,i=0;
   out=out.replace(/(from\s+['"])([^'"]+)(['"])/g,(m,a,s,b)=>a+depUrls[i++]+b);
   const blobUrl=URL.createObjectURL(new Blob([out],{type:'text/javascript'}));
-  moduleCache.set(url,blobUrl);
+  moduleCache.set(abs,blobUrl);
   return blobUrl;
 }
 async function tryLoad(){
   let lastErr=null;
   for(const cdn of CDNS){
     try{
-      THREE_URL=cdn.base+'build/three.module.js';
-      const THREE=await withTimeout(import(THREE_URL),14000);
+      THREE_URL=new URL(cdn.base+(cdn.threePath||'build/three.module.js'),location.href).href;
+      const THREE=await withTimeout(import(THREE_URL),8000);
       const orbit=await import(await loadModule(cdn.base+'examples/jsm/controls/OrbitControls.js'));
       const ec=await import(await loadModule(cdn.base+'examples/jsm/postprocessing/EffectComposer.js'));
       const rp=await import(await loadModule(cdn.base+'examples/jsm/postprocessing/RenderPass.js'));
@@ -1941,8 +1963,20 @@ async function tryLoad(){
 tryLoad().then(boot).catch(err=>{
   const el=document.getElementById('loading');
   if(el){
-    el.querySelector('.msg').textContent='资源加载失败：'+err.message+' — 请确认网络可访问 CDN 后刷新';
+    el.querySelector('.msg').innerHTML=
+      '资源加载失败：'+String(err&&err.message||err)+
+      '<br><span style="opacity:.65;font-size:.86em">本地副本和 4 个 CDN 都没取到 three.js</span>';
     el.querySelector('.ring').style.display='none';
+    if(!el.querySelector('.retry')){
+      const b=document.createElement('button');
+      b.className='retry';
+      b.textContent='重新加载';
+      b.style.cssText='margin-top:16px;padding:.5rem 1.2rem;border-radius:999px;'+
+        'border:1px solid rgba(228,87,46,.6);background:rgba(228,87,46,.16);'+
+        'color:#f3e6d8;font:inherit;letter-spacing:.1em;cursor:pointer';
+      b.addEventListener('click',()=>location.reload());
+      el.appendChild(b);
+    }
   }
   console.error(err);
 });
